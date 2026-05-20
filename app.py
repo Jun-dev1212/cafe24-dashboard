@@ -154,7 +154,7 @@ with st.expander("🔧 API 연결 진단", expanded=True):
         st.success(f"✅ Cafe24 토큰 갱신 성공 (access_token: {api.access_token[:10]}...)")
         import requests as _req
         _url = f"{api.base_url}/orders"
-        _resp = _req.get(_url, headers=api._headers(), params={"start_date": s, "end_date": e, "order_status": "F", "search_date_type": "order_date", "shop_no": 1, "limit": 5})
+        _resp = _req.get(_url, headers=api._headers(), params={"start_date": s, "end_date": e, "shop_no": 1, "limit": 3})
         st.info(f"HTTP {_resp.status_code}: {_resp.text[:500]}")
     except Exception as ex:
         st.error(f"❌ Cafe24 오류: {ex}")

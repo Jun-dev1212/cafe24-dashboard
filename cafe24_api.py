@@ -50,26 +50,20 @@ class Cafe24API:
 
     def get_orders(self, start_date: str, end_date: str) -> list:
         all_orders = []
-        for status in self.PAID_STATUSES:
-            offset = 0
-            while True:
-                try:
-                    data = self._get("orders", {
-                        "start_date": start_date,
-                        "end_date": end_date,
-                        "order_status": status,
-                        "search_date_type": "order_date",
-                        "shop_no": 1,
-                        "limit": 100,
-                        "offset": offset,
-                    })
-                    chunk = data.get("orders", [])
-                    all_orders.extend(chunk)
-                    if len(chunk) < 100:
-                        break
-                    offset += 100
-                except Exception as e:
-                    raise
+        offset = 0
+        while True:
+            data = self._get("orders", {
+                "start_date": start_date,
+                "end_date": end_date,
+                "shop_no": 1,
+                "limit": 100,
+                "offset": offset,
+            })
+            chunk = data.get("orders", [])
+            all_orders.extend(chunk)
+            if len(chunk) < 100:
+                break
+            offset += 100
         return all_orders
 
     def get_sales_report(self, start_date: str, end_date: str) -> list:
