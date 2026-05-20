@@ -159,10 +159,8 @@ with st.spinner("이전 기간 데이터 로드 중…"):
     prev_c24 = load_cafe24(ps, pe)
     prev_cpg = load_coupang(ps, pe)
 
-df_prev = pd.concat(
-    [df for df in [prev_c24, prev_cpg] if not df.empty],
-    ignore_index=True,
-)
+_prev_frames = [df for df in [prev_c24, prev_cpg] if not df.empty]
+df_prev = pd.concat(_prev_frames, ignore_index=True) if _prev_frames else pd.DataFrame()
 
 
 # ── 공통 헬퍼 ─────────────────────────────────────────────
