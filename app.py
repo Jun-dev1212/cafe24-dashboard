@@ -162,6 +162,19 @@ with st.expander("🔧 API 연결 진단", expanded=True):
             st.info(f"첫 주문 — payment_amount: {o.get('payment_amount')} | canceled: {o.get('canceled')} | shipping_status: {o.get('shipping_status')} | order_date: {o.get('order_date')}")
         else:
             st.warning(f"HTTP {_resp.status_code}: 주문 없음")
+
+        # load_cafe24 내부 단계별 추적
+        st.markdown("---")
+        try:
+            raw = api.get_orders(s, e)
+            st.info(f"📦 get_orders 결과: {len(raw)}건")
+            if raw:
+                r0 = raw[0]
+                st.info(f"첫 raw 주문 — payment_amount: {r0.get('payment_amount')} | canceled: {r0.get('canceled')}")
+            df_debug = cafe24_process(raw)
+            st.info(f"✅ process_orders 결과: {len(df_debug)}행")
+        except Exception as ex2:
+            st.error(f"❌ 단계별 디버그 오류: {ex2}")
     except Exception as ex:
         st.error(f"❌ Cafe24 오류: {ex}")
 
