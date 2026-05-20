@@ -148,10 +148,8 @@ with st.spinner("데이터 불러오는 중…"):
     df_cpg = load_coupang(s, e)
     df_vis = load_visitor_stats(s, e)
 
-df_all = pd.concat(
-    [df for df in [df_c24, df_cpg] if not df.empty],
-    ignore_index=True,
-)
+_frames = [df for df in [df_c24, df_cpg] if not df.empty]
+df_all = pd.concat(_frames, ignore_index=True) if _frames else pd.DataFrame()
 
 period_days = max((end - start).days, 1)
 ps = (start - timedelta(days=period_days)).strftime("%Y-%m-%d")
