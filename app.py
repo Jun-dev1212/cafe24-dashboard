@@ -93,10 +93,17 @@ def load_cafe24(start: str, end: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-@st.cache_data(ttl=300, show_spinner=False)
 def load_visitor_stats(start: str, end: str) -> pd.DataFrame:
-    rows = get_cafe24().get_visitor_stats(start, end)
+    cache_key = f"vis_{start}_{end}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    try:
+        raw = get_cafe24()._get("reports/visitorsstatistics", {"start_date": start, "end_date": end})
+        rows = raw.get("visitorsstatistics", [])
+    except Exception:
+        rows = []
     if not rows:
+        st.session_state[cache_key] = pd.DataFrame()
         return pd.DataFrame()
     records = []
     for r in rows:
@@ -110,7 +117,9 @@ def load_visitor_stats(start: str, end: str) -> pd.DataFrame:
             })
         except Exception:
             continue
-    return pd.DataFrame(records)
+    df = pd.DataFrame(records)
+    st.session_state[cache_key] = df
+    return df
 
 
 @st.cache_data(ttl=300, show_spinner=False)
