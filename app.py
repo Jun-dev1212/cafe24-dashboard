@@ -62,15 +62,31 @@ def get_coupang() -> CoupangAPI:
 
 
 # ── 데이터 로드 (5분 캐시) ────────────────────────────────
-@st.cache_data(ttl=300, show_spinner=False)
 def load_cafe24(start: str, end: str) -> pd.DataFrame:
+    cache_key = f"cafe24_{start}_{end}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
     try:
-        orders = get_cafe24().get_orders(start, end)
-        st.info(f"🔄 load_cafe24 실행됨 — get_orders: {len(orders)}건")
-        df = cafe24_process(orders)
-        st.info(f"🔄 process_orders: {len(df)}행")
+        api = get_cafe24()
+        all_orders = []
+        offset = 0
+        while True:
+            data = api._get("orders", {
+                "start_date": start,
+                "end_date": end,
+                "shop_no": 1,
+                "limit": 100,
+                "offset": offset,
+            })
+            chunk = data.get("orders", [])
+            all_orders.extend(chunk)
+            if len(chunk) < 100:
+                break
+            offset += 100
+        df = cafe24_process(all_orders)
         if not df.empty:
             df["channel"] = "Cafe24"
+        st.session_state[cache_key] = df
         return df
     except Exception as e:
         st.error(f"Cafe24 API 오류: {e}")
@@ -140,6 +156,9 @@ with st.sidebar:
         end = st.date_input("종료일", today)
 
     if st.button("🔄 새로고침", use_container_width=True):
+        for k in list(st.session_state.keys()):
+            if k.startswith("cafe24_") or k.startswith("cpg_"):
+                del st.session_state[k]
         st.cache_data.clear()
         st.rerun()
 
