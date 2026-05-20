@@ -55,6 +55,7 @@ class Cafe24API:
             data = self._get("orders", {
                 "start_date": start_date,
                 "end_date": end_date,
+                "paid": "T",
                 "shop_no": 1,
                 "limit": 100,
                 "offset": offset,
@@ -95,6 +96,8 @@ def process_orders(orders: list) -> pd.DataFrame:
         return pd.DataFrame()
     rows = []
     for o in orders:
+        if o.get("canceled") == "T":
+            continue
         try:
             dt_str = o.get("order_date", "")
             dt = datetime.fromisoformat(dt_str.replace("+0900", "+09:00"))
@@ -103,10 +106,10 @@ def process_orders(orders: list) -> pd.DataFrame:
                 "order_date": dt.date(),
                 "order_datetime": dt,
                 "hour": dt.hour,
-                "weekday": dt.weekday(),  # 0=월 ~ 6=일
-                "actual_price": float(o.get("actual_price", 0) or 0),
+                "weekday": dt.weekday(),
+                "actual_price": float(o.get("payment_amount") or o.get("actual_order_amount") or 0),
                 "payment_method": o.get("payment_method", ""),
-                "order_status": o.get("order_status", ""),
+                "order_status": o.get("shipping_status") or "",
                 "member_id": o.get("member_id", ""),
             })
         except Exception:
