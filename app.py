@@ -244,7 +244,7 @@ def render_kpi(df: pd.DataFrame, df_p: pd.DataFrame):
         st.metric("🧾 객단가", f"₩{aov:,.0f}", kpi_delta(aov, prev_aov))
 
 
-def render_daily(df: pd.DataFrame):
+def render_daily(df: pd.DataFrame, tab: str = ""):
     daily = (
         df.groupby(["order_date", "channel"])
         .agg(revenue=("actual_price", "sum"), orders=("order_id", "count"))
@@ -273,10 +273,10 @@ def render_daily(df: pd.DataFrame):
     )
     fig.update_yaxes(title_text="매출 (원)", tickformat=",", secondary_y=False)
     fig.update_yaxes(title_text="주문 건수", secondary_y=True)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"daily_{tab}")
 
 
-def render_hourly_dow(df: pd.DataFrame):
+def render_hourly_dow(df: pd.DataFrame, tab: str = ""):
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("##### 시간대별 주문")
@@ -296,7 +296,7 @@ def render_hourly_dow(df: pd.DataFrame):
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             margin=dict(l=0, r=0, t=10, b=0),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key=f"hourly_{tab}")
 
     with col2:
         st.markdown("##### 요일별 평균 주문")
@@ -318,10 +318,10 @@ def render_hourly_dow(df: pd.DataFrame):
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             margin=dict(l=0, r=0, t=10, b=0),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key=f"dow_{tab}")
 
 
-def render_heatmap(df: pd.DataFrame):
+def render_heatmap(df: pd.DataFrame, tab: str = ""):
     hm = df.groupby(["weekday", "hour"])["order_id"].count().reset_index()
     pivot = hm.pivot(index="weekday", columns="hour", values="order_id").fillna(0)
     for h in range(24):
@@ -344,10 +344,10 @@ def render_heatmap(df: pd.DataFrame):
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=0, r=0, t=10, b=0),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"heatmap_{tab}")
 
 
-def render_traffic(df_vis: pd.DataFrame):
+def render_traffic(df_vis: pd.DataFrame, tab: str = ""):
     if df_vis.empty:
         st.caption("접속통계 데이터 없음 (API 응답 대기 중)")
         return
@@ -370,7 +370,7 @@ def render_traffic(df_vis: pd.DataFrame):
     )
     fig.update_yaxes(title_text="방문자 수", secondary_y=False)
     fig.update_yaxes(title_text="전환율 (%)", secondary_y=True)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"traffic_{tab}")
 
     # 요약 지표
     c1, c2, c3 = st.columns(3)
@@ -383,7 +383,7 @@ def render_traffic(df_vis: pd.DataFrame):
         st.metric("총 페이지뷰", f"{df_vis['pageviews'].sum():,}")
 
 
-def render_prev_compare(df: pd.DataFrame, df_p: pd.DataFrame):
+def render_prev_compare(df: pd.DataFrame, df_p: pd.DataFrame, tab: str = ""):
     if df_p.empty:
         return
     rev, n = df["actual_price"].sum(), len(df)
@@ -405,7 +405,7 @@ def render_prev_compare(df: pd.DataFrame, df_p: pd.DataFrame):
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=0, r=0, t=30, b=0),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"compare_{tab}")
 
 
 # ── 헤더 ──────────────────────────────────────────────────
@@ -441,7 +441,7 @@ with tab_all:
             height=240, margin=dict(l=0, r=0, t=0, b=0),
             paper_bgcolor="rgba(0,0,0,0)",
         )
-        st.plotly_chart(fig_pie, use_container_width=True)
+        st.plotly_chart(fig_pie, use_container_width=True, key="pie_all")
 
     with pc2:
         for ch, color in CH_COLOR.items():
@@ -460,18 +460,18 @@ with tab_all:
 
     st.divider()
     st.markdown("### 일별 매출 추이 (채널 누적)")
-    render_daily(df_all)
+    render_daily(df_all, tab="all")
 
     st.markdown("### 구매 집중 시간대")
-    render_heatmap(df_all)
-    render_hourly_dow(df_all)
+    render_heatmap(df_all, tab="all")
+    render_hourly_dow(df_all, tab="all")
 
     st.markdown("### 전기간 대비")
-    render_prev_compare(df_all, df_prev)
+    render_prev_compare(df_all, df_prev, tab="all")
 
     st.divider()
     st.markdown("### 트래픽 & 구매전환율 (Cafe24 기준)")
-    render_traffic(df_vis)
+    render_traffic(df_vis, tab="all")
 
 
 # ── [Cafe24] 탭 ───────────────────────────────────────────
@@ -482,12 +482,12 @@ with tab_c24:
         render_kpi(df_c24, prev_c24)
         st.divider()
         st.markdown("### 일별 매출")
-        render_daily(df_c24)
+        render_daily(df_c24, tab="c24")
         st.markdown("### 구매 집중 시간대")
-        render_heatmap(df_c24)
-        render_hourly_dow(df_c24)
+        render_heatmap(df_c24, tab="c24")
+        render_hourly_dow(df_c24, tab="c24")
         st.markdown("### 전기간 대비")
-        render_prev_compare(df_c24, prev_c24)
+        render_prev_compare(df_c24, prev_c24, tab="c24")
 
         if "payment_method" in df_c24.columns:
             st.markdown("### 결제수단 비중")
@@ -501,7 +501,7 @@ with tab_c24:
                                  margin=dict(l=0, r=0, t=0, b=0))
             _, cm, _ = st.columns([1, 2, 1])
             with cm:
-                st.plotly_chart(fig_pm, use_container_width=True)
+                st.plotly_chart(fig_pm, use_container_width=True, key="pie_c24")
 
 
 # ── [쿠팡Wing] 탭 ─────────────────────────────────────────
@@ -512,12 +512,12 @@ with tab_cpg:
         render_kpi(df_cpg, prev_cpg)
         st.divider()
         st.markdown("### 일별 매출")
-        render_daily(df_cpg)
+        render_daily(df_cpg, tab="cpg")
         st.markdown("### 구매 집중 시간대")
-        render_heatmap(df_cpg)
-        render_hourly_dow(df_cpg)
+        render_heatmap(df_cpg, tab="cpg")
+        render_hourly_dow(df_cpg, tab="cpg")
         st.markdown("### 전기간 대비")
-        render_prev_compare(df_cpg, prev_cpg)
+        render_prev_compare(df_cpg, prev_cpg, tab="cpg")
 
         st.markdown("### 트래픽 & 구매전환율")
-        render_traffic(df_vis)
+        render_traffic(df_vis, tab="cpg")
