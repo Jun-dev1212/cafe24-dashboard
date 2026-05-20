@@ -65,7 +65,10 @@ def get_coupang() -> CoupangAPI:
 @st.cache_data(ttl=300, show_spinner=False)
 def load_cafe24(start: str, end: str) -> pd.DataFrame:
     try:
-        df = cafe24_process(get_cafe24().get_orders(start, end))
+        orders = get_cafe24().get_orders(start, end)
+        st.info(f"🔄 load_cafe24 실행됨 — get_orders: {len(orders)}건")
+        df = cafe24_process(orders)
+        st.info(f"🔄 process_orders: {len(df)}행")
         if not df.empty:
             df["channel"] = "Cafe24"
         return df
