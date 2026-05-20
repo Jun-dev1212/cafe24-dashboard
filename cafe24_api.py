@@ -58,6 +58,8 @@ class Cafe24API:
                         "start_date": start_date,
                         "end_date": end_date,
                         "order_status": status,
+                        "search_date_type": "order_date",
+                        "shop_no": 1,
                         "limit": 100,
                         "offset": offset,
                     })

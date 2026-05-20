@@ -152,7 +152,7 @@ with st.expander("🔧 API 연결 진단", expanded=True):
     try:
         api = get_cafe24()
         st.success(f"✅ Cafe24 토큰 갱신 성공 (access_token: {api.access_token[:10]}...)")
-        raw = api._get("orders", {"start_date": s, "end_date": e, "order_status": "F", "limit": 5})
+        raw = api._get("orders", {"start_date": s, "end_date": e, "order_status": "F", "search_date_type": "order_date", "shop_no": 1, "limit": 5})
         st.info(f"주문 API 응답: {raw}")
     except Exception as ex:
         st.error(f"❌ Cafe24 오류: {ex}")
