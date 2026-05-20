@@ -112,6 +112,8 @@ def process_orders(orders: list) -> pd.DataFrame:
                 "payment_method": o.get("payment_method", ""),
                 "order_status": o.get("shipping_status") or "",
                 "member_id": o.get("member_id", ""),
+                "channel_type": o.get("channel_type") or o.get("device_channel") or "",
+                "from_place": o.get("from_place") or o.get("order_from_id") or "",
             })
         except Exception:
             continue
