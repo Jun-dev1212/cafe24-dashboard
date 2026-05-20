@@ -397,11 +397,7 @@ def render_funnel(df_c24: pd.DataFrame, df_vis: pd.DataFrame, tab: str = ""):
         marker=dict(color=colors, line=dict(width=2, color="white")),
         connector=dict(line=dict(color="rgba(0,0,0,0.08)", width=1)),
     ))
-    fig.update_layout(
-        height=300,
-        **_CHART_BASE,
-        margin=dict(l=0, r=60, t=20, b=0),
-    )
+    fig.update_layout(**{**_CHART_BASE, "height": 300, "margin": dict(l=0, r=60, t=20, b=0)})
     st.plotly_chart(fig, use_container_width=True, key=f"funnel_{tab}")
 
     if len(values) >= 2:
