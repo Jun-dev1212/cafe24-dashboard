@@ -6,6 +6,7 @@ from datetime import date, timedelta
 
 from cafe24_api import Cafe24API, process_orders as cafe24_process
 from coupang_api import CoupangAPI, process_orders as coupang_process
+from meta_api import MetaAdsAPI, process_meta_insights, process_meta_daily
 
 st.set_page_config(
     page_title="보뉴랩 운영 리포트",
@@ -61,7 +62,18 @@ def get_coupang() -> CoupangAPI:
     )
 
 
-# ── 데이터 로드 (session_state 캐시) ─────────────────────────
+@st.cache_resource
+def get_meta():
+    try:
+        return MetaAdsAPI(
+            access_token=st.secrets["meta_access_token"],
+            ad_account_id=st.secrets["meta_ad_account_id"],
+        )
+    except Exception:
+        return None
+
+
+# ── 데이터 로드 ───────────────────────────────────────────────
 def load_cafe24(start: str, end: str) -> pd.DataFrame:
     ck = f"cafe24_{start}_{end}"
     if ck in st.session_state:
@@ -103,6 +115,26 @@ def load_coupang(start: str, end: str) -> pd.DataFrame:
         st.warning(f"쿠팡 API: {e}")
         st.session_state[ck] = pd.DataFrame()
         return pd.DataFrame()
+
+
+def load_meta(start: str, end: str):
+    ck = f"meta_{start}_{end}"
+    if ck in st.session_state:
+        return st.session_state[ck]
+    api = get_meta()
+    if api is None:
+        result = (pd.DataFrame(), pd.DataFrame())
+        st.session_state[ck] = result
+        return result
+    try:
+        ad_insights = process_meta_insights(api.get_insights(start, end, level="ad"))
+        daily = process_meta_daily(api.get_daily_insights(start, end))
+        result = (ad_insights, daily)
+    except Exception as e:
+        st.warning(f"Meta Ads 오류: {e}")
+        result = (pd.DataFrame(), pd.DataFrame())
+    st.session_state[ck] = result
+    return result
 
 
 def load_visitor_stats(start: str, end: str) -> pd.DataFrame:
@@ -168,13 +200,13 @@ with st.sidebar:
 
     if st.button("🔄 새로고침", use_container_width=True, key="refresh_btn"):
         for k in list(st.session_state.keys()):
-            if any(k.startswith(p) for p in ("cafe24_", "cpg_", "vis_")):
+            if any(k.startswith(p) for p in ("cafe24_", "cpg_", "vis_", "meta_")):
                 del st.session_state[k]
         st.rerun()
 
     st.divider()
     st.caption(f"{start.strftime('%Y.%m.%d')} ~ {end.strftime('%Y.%m.%d')}")
-    st.caption("Cafe24 + 쿠팡Wing")
+    st.caption("Cafe24 + 쿠팡Wing + Meta Ads")
 
 
 # ── 데이터 로드 ───────────────────────────────────────────────
@@ -189,6 +221,7 @@ with st.spinner("데이터 불러오는 중…"):
     df_vis = load_visitor_stats(s, e)
     prev_c24 = load_cafe24(ps, pe)
     prev_cpg = load_coupang(ps, pe)
+    df_meta_ads, df_meta_daily = load_meta(s, e)
 
 _frames = [df for df in [df_c24, df_cpg] if not df.empty]
 df_all = pd.concat(_frames, ignore_index=True) if _frames else pd.DataFrame()
@@ -220,7 +253,6 @@ _CHART_BASE = dict(
 # ── 렌더 함수 ─────────────────────────────────────────────────
 
 def render_kpi_cards(df: pd.DataFrame, df_p: pd.DataFrame):
-    """주문건수 → 매출 → 객단가 HTML 카드"""
     if df.empty:
         return
     n = len(df)
@@ -358,10 +390,7 @@ def render_heatmap(df: pd.DataFrame, tab: str = ""):
         showscale=True,
         hoverongaps=False,
     ))
-    fig.update_layout(
-        height=240, xaxis=dict(side="top"),
-        **_CHART_BASE,
-    )
+    fig.update_layout(height=240, xaxis=dict(side="top"), **_CHART_BASE)
     st.plotly_chart(fig, use_container_width=True, key=f"heatmap_{tab}")
 
 
@@ -370,11 +399,9 @@ def render_funnel(df_c24: pd.DataFrame, df_vis: pd.DataFrame, tab: str = ""):
         st.caption("퍼널 데이터 없음")
         return
     n_paid = len(df_c24)
-    confirmed = ["D", "E", "F"]
-    n_confirmed = len(df_c24[df_c24["order_status"].isin(confirmed)])
+    n_confirmed = len(df_c24[df_c24["order_status"].isin(["D", "E", "F"])])
 
     stages, values = [], []
-
     if not df_vis.empty and df_vis["visitors"].sum() > 0:
         stages.append("방문자")
         values.append(int(df_vis["visitors"].sum()))
@@ -382,19 +409,14 @@ def render_funnel(df_c24: pd.DataFrame, df_vis: pd.DataFrame, tab: str = ""):
         if vis_orders > 0:
             stages.append("주문 시도")
             values.append(vis_orders)
-
     stages += ["결제 완료", "구매 확정"]
     values += [n_paid, n_confirmed]
 
-    n = len(stages)
     palette = ["#dbeafe", "#93c5fd", "#3b82f6", "#1e40af"]
-    colors = palette[-n:]
-
     fig = go.Figure(go.Funnel(
         y=stages, x=values,
-        textposition="inside",
-        textinfo="value+percent initial",
-        marker=dict(color=colors, line=dict(width=2, color="white")),
+        textposition="inside", textinfo="value+percent initial",
+        marker=dict(color=palette[-len(stages):], line=dict(width=2, color="white")),
         connector=dict(line=dict(color="rgba(0,0,0,0.08)", width=1)),
     ))
     fig.update_layout(**{**_CHART_BASE, "height": 300, "margin": dict(l=0, r=60, t=20, b=0)})
@@ -403,9 +425,8 @@ def render_funnel(df_c24: pd.DataFrame, df_vis: pd.DataFrame, tab: str = ""):
     if len(values) >= 2:
         cvr_cols = st.columns(min(len(values) - 1, 3))
         for c, s1, s2, v1, v2 in zip(cvr_cols, stages, stages[1:], values, values[1:]):
-            cr = v2 / v1 * 100 if v1 > 0 else 0
             with c:
-                st.metric(f"{s1}→{s2}", f"{cr:.1f}%")
+                st.metric(f"{s1}→{s2}", f"{v2/v1*100:.1f}%" if v1 > 0 else "-")
 
 
 def render_traffic(df_vis: pd.DataFrame, tab: str = ""):
@@ -415,20 +436,13 @@ def render_traffic(df_vis: pd.DataFrame, tab: str = ""):
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(
         go.Bar(x=df_vis["date"], y=df_vis["visitors"], name="방문자",
-               marker_color="#A8C8F8", opacity=0.85),
-        secondary_y=False,
-    )
+               marker_color="#A8C8F8", opacity=0.85), secondary_y=False)
     fig.add_trace(
         go.Scatter(x=df_vis["date"], y=df_vis["conversion_rate"], name="전환율(%)",
                    line=dict(color="#FF6B6B", width=2.5), mode="lines+markers",
-                   marker=dict(size=6)),
-        secondary_y=True,
-    )
-    fig.update_layout(
-        hovermode="x unified", height=280,
-        legend=dict(orientation="h", y=1.12),
-        **_CHART_BASE,
-    )
+                   marker=dict(size=6)), secondary_y=True)
+    fig.update_layout(hovermode="x unified", height=280,
+                      legend=dict(orientation="h", y=1.12), **_CHART_BASE)
     fig.update_yaxes(title_text="방문자 수", gridcolor="#f0f0f0", secondary_y=False)
     fig.update_yaxes(title_text="전환율 (%)", secondary_y=True)
     st.plotly_chart(fig, use_container_width=True, key=f"traffic_{tab}")
@@ -442,12 +456,10 @@ def render_channel_utm(df: pd.DataFrame, tab: str = ""):
     if df.empty:
         st.caption("데이터 없음")
         return
-
     has_ch = "channel_type" in df.columns and df["channel_type"].astype(str).str.strip().ne("").any()
     has_fp = "from_place" in df.columns and df["from_place"].astype(str).str.strip().ne("").any()
-
     if not has_ch and not has_fp:
-        st.info("채널/유입경로 데이터가 없습니다. Cafe24 orders API의 channel_type·from_place 필드 확인이 필요합니다.")
+        st.info("채널/유입경로 데이터가 없습니다.")
         return
 
     col1, col2 = st.columns(2)
@@ -457,9 +469,8 @@ def render_channel_utm(df: pd.DataFrame, tab: str = ""):
         st.markdown("##### 채널 유형별 매출")
         if has_ch:
             cdf = df[df["channel_type"].astype(str).str.strip() != ""]
-            cd = (cdf.groupby("channel_type")
-                  .agg(revenue=("actual_price", "sum"), orders=("order_id", "count"))
-                  .sort_values("revenue", ascending=False).reset_index())
+            cd = cdf.groupby("channel_type").agg(
+                revenue=("actual_price", "sum")).sort_values("revenue", ascending=False).reset_index()
             fig = go.Figure(go.Bar(
                 x=cd["channel_type"], y=cd["revenue"],
                 marker=dict(color="#4F86F7", line=dict(width=0)),
@@ -475,20 +486,16 @@ def render_channel_utm(df: pd.DataFrame, tab: str = ""):
         st.markdown("##### 유입경로별 매출 (Top 10)")
         if has_fp:
             fdf = df[df["from_place"].astype(str).str.strip() != ""]
-            fd = (fdf.groupby("from_place")
-                  .agg(revenue=("actual_price", "sum"), orders=("order_id", "count"))
-                  .sort_values("revenue", ascending=False).head(10).reset_index())
+            fd = fdf.groupby("from_place").agg(
+                revenue=("actual_price", "sum")).sort_values("revenue", ascending=False).head(10).reset_index()
             fig = go.Figure(go.Bar(
-                x=fd["revenue"], y=fd["from_place"],
-                orientation="h",
+                x=fd["revenue"], y=fd["from_place"], orientation="h",
                 marker=dict(color="#6366f1", line=dict(width=0)),
                 text=fd["revenue"].apply(lambda x: f"₩{x/10000:.0f}만"),
                 textposition="outside",
             ))
             fig.update_layout(
-                height=300,
-                xaxis=dict(gridcolor="#f0f0f0"),
-                yaxis=dict(autorange="reversed"),
+                height=300, xaxis=dict(gridcolor="#f0f0f0"), yaxis=dict(autorange="reversed"),
                 **{k: v for k, v in _CHART_BASE.items() if k != "margin"},
                 margin=dict(l=90, r=60, t=20, b=0),
             )
@@ -496,70 +503,185 @@ def render_channel_utm(df: pd.DataFrame, tab: str = ""):
         else:
             st.caption("유입경로 데이터 없음")
 
-    st.markdown("##### 채널별 상세")
     grp_col = "channel_type" if has_ch else "from_place"
     label = "채널유형" if has_ch else "유입경로"
     tbl_df = df[df[grp_col].astype(str).str.strip() != ""]
     tbl = (tbl_df.groupby(grp_col)
-           .agg(주문건수=("order_id", "count"),
-                총매출=("actual_price", "sum"),
+           .agg(주문건수=("order_id", "count"), 총매출=("actual_price", "sum"),
                 객단가=("actual_price", "mean"))
-           .sort_values("총매출", ascending=False).reset_index())
-    tbl = tbl.rename(columns={grp_col: label})
+           .sort_values("총매출", ascending=False).reset_index()
+           .rename(columns={grp_col: label}))
     tbl["총매출"] = tbl["총매출"].map(lambda x: f"₩{x:,.0f}")
     tbl["객단가"] = tbl["객단가"].map(lambda x: f"₩{x:,.0f}")
+    st.markdown("##### 채널별 상세")
     st.dataframe(tbl, use_container_width=True, hide_index=True)
 
 
-def render_meta_placeholder():
-    st.markdown(
-        '<div style="background:#fff7ed;border-radius:14px;padding:20px 24px;'
-        'border-left:4px solid #f97316;margin-bottom:20px">'
-        '<h4 style="color:#9a3412;margin:0 0 6px">📣 Meta Ads 미연결</h4>'
-        '<p style="color:#7c2d12;margin:0">Meta Business Manager API 연동 후 소재별 성과 분석이 활성화됩니다.</p>'
-        '</div>',
-        unsafe_allow_html=True,
+def _kpi_card(title, value, color):
+    return (
+        f'<div style="background:#f8faff;border-radius:12px;padding:14px 10px;'
+        f'text-align:center;border-top:4px solid {color};'
+        f'box-shadow:0 2px 8px rgba(0,0,0,0.07)">'
+        f'<div style="font-size:12px;color:#6b7280;margin-bottom:4px">{title}</div>'
+        f'<div style="font-size:20px;font-weight:800;color:#111827">{value}</div>'
+        f'</div>'
     )
 
-    st.markdown("#### 연동 설정 가이드")
-    with st.expander("Step 1 — Meta Business Manager 앱 생성"):
-        st.markdown("""
-1. [Meta Business Manager](https://business.facebook.com/) 접속
-2. 좌측 메뉴 → **앱** → **앱 추가** → **Business** 유형 선택
-3. 앱 이름 지정 후 생성 → **앱 ID** 메모
-        """)
 
-    with st.expander("Step 2 — 시스템 사용자 액세스 토큰 발급"):
-        st.markdown("""
-1. Business Manager → **비즈니스 설정** → **사용자** → **시스템 사용자**
-2. 시스템 사용자 추가 (관리자 권한)
-3. **토큰 생성** → 앱 선택 → 권한: `ads_read`, `ads_management`
-4. 생성된 토큰 복사
-        """)
+def render_meta_ads(df_ads: pd.DataFrame, df_daily: pd.DataFrame):
+    if df_ads.empty:
+        st.info("Meta Ads 데이터가 없습니다. 선택 기간에 집행된 광고가 없거나 API 오류입니다.")
+        return
 
-    with st.expander("Step 3 — 광고 계정 ID 확인"):
-        st.markdown("""
-1. Business Manager → **비즈니스 설정** → **계정** → **광고 계정**
-2. 계정 ID 확인 (형식: `act_XXXXXXXXXX`)
-        """)
+    # ── KPI 6종: 소진 / 노출 / 도달 / CTR / CPC / ROAS ──────
+    total_spend = df_ads["spend"].sum()
+    total_impr = df_ads["impressions"].sum()
+    total_reach = df_ads["reach"].sum() if "reach" in df_ads.columns else 0
+    total_clicks = df_ads["clicks"].sum()
+    total_purchases = df_ads["purchases"].sum()
+    total_revenue = df_ads["purchase_value"].sum()
+    avg_ctr = total_clicks / total_impr * 100 if total_impr > 0 else 0
+    avg_cpc = total_spend / total_clicks if total_clicks > 0 else 0
+    avg_cpm = total_spend / total_impr * 1000 if total_impr > 0 else 0
+    roas = total_revenue / total_spend if total_spend > 0 else 0
 
-    with st.expander("Step 4 — secrets.toml 업데이트"):
-        st.code("""
-# .streamlit/secrets.toml
-meta_app_id        = "YOUR_APP_ID"
-meta_access_token  = "YOUR_SYSTEM_USER_TOKEN"
-meta_ad_account_id = "act_XXXXXXXXXX"
-        """, language="toml")
+    kpi_items = [
+        ("💸 광고 소진", f"₩{total_spend:,.0f}", "#f97316"),
+        ("👁 노출", f"{total_impr:,}", "#6366f1"),
+        ("👤 도달", f"{total_reach:,}", "#8b5cf6"),
+        ("📊 CTR", f"{avg_ctr:.2f}%", "#4F86F7"),
+        ("💵 CPC", f"₩{avg_cpc:,.0f}", "#0ea5e9"),
+        ("🎯 ROAS", f"{roas:.2f}x", "#22c55e" if roas >= 1 else "#ef4444"),
+    ]
+    cols = st.columns(6)
+    for col, (title, value, color) in zip(cols, kpi_items):
+        with col:
+            st.markdown(_kpi_card(title, value, color), unsafe_allow_html=True)
+
+    st.markdown("")
+
+    # ── 일별 지출 & 전환 추이 ──────────────────────────────────
+    if not df_daily.empty:
+        st.markdown("### 일별 광고 지출 & 구매 전환")
+        daily_agg = df_daily.groupby("date").agg(
+            spend=("spend", "sum"), purchases=("purchases", "sum")).reset_index()
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        fig.add_trace(
+            go.Bar(x=daily_agg["date"], y=daily_agg["spend"], name="지출(원)",
+                   marker_color="#f97316", opacity=0.8), secondary_y=False)
+        fig.add_trace(
+            go.Scatter(x=daily_agg["date"], y=daily_agg["purchases"], name="구매 전환",
+                       line=dict(color="#6366f1", width=2.5), mode="lines+markers",
+                       marker=dict(size=6)), secondary_y=True)
+        fig.update_layout(hovermode="x unified", height=280,
+                          legend=dict(orientation="h", y=1.12), **_CHART_BASE)
+        fig.update_yaxes(title_text="지출 (원)", tickformat=",", gridcolor="#f0f0f0", secondary_y=False)
+        fig.update_yaxes(title_text="구매 전환 수", secondary_y=True)
+        st.plotly_chart(fig, use_container_width=True, key="meta_daily")
 
     st.divider()
-    st.markdown("#### 연동 후 제공 예정 지표")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown("**캠페인 성과**\n- 노출 / 클릭 / CTR\n- 지출 vs 매출\n- ROAS 추이")
-    with c2:
-        st.markdown("**소재별 분석**\n- 소재별 CTR / CPC / ROAS\n- 클릭→결제 전환율\n- 상위 소재 랭킹")
-    with c3:
-        st.markdown("**오디언스 분석**\n- 연령/성별 전환율\n- 디바이스별 성과\n- 시간대별 광고 효율")
+
+    # ── 캠페인별 성과 테이블 ───────────────────────────────────
+    st.markdown("### 캠페인별 성과")
+    agg_cols = {c: "sum" for c in ["impressions", "reach", "clicks", "cpm", "spend", "purchases", "purchase_value"] if c in df_ads.columns}
+    camp = df_ads.groupby("campaign").agg(agg_cols).reset_index()
+    camp["CTR(%)"] = (camp["clicks"] / camp["impressions"] * 100).round(2)
+    camp["ROAS"] = (camp["purchase_value"] / camp["spend"]).round(2)
+    camp = camp.sort_values("spend", ascending=False)
+    disp = camp.copy()
+    for c in ["spend", "purchase_value"]:
+        if c in disp.columns:
+            disp[c] = disp[c].map(lambda x: f"₩{x:,.0f}")
+    for c in ["impressions", "reach"]:
+        if c in disp.columns:
+            disp[c] = disp[c].map(lambda x: f"{x:,}")
+    disp = disp.rename(columns={
+        "campaign": "캠페인", "impressions": "노출", "reach": "도달",
+        "clicks": "클릭", "cpm": "CPM(원)", "spend": "소진",
+        "purchases": "구매", "purchase_value": "전환매출", "ROAS": "ROAS",
+    })
+    st.dataframe(disp, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # ── 소재별 성과 — 주요(ROAS≥1) / 일반 분류 ───────────────
+    st.markdown("### 소재별 성과")
+    ad_df = df_ads[df_ads.get("ad", pd.Series(dtype=str)).ne("") if "ad" in df_ads.columns else df_ads.index.isin([])].copy() if "ad" in df_ads.columns else pd.DataFrame()
+    if "ad" in df_ads.columns:
+        ad_df = df_ads[df_ads["ad"].astype(str).str.strip() != ""].copy()
+    if ad_df.empty:
+        st.caption("소재 레벨 데이터 없음")
+        return
+
+    ad_df = ad_df.sort_values("roas", ascending=False)
+    key_ads = ad_df[ad_df["roas"] >= 1]
+    other_ads = ad_df[ad_df["roas"] < 1]
+
+    # 주요 소재 배너
+    c_key, c_other = st.columns(2)
+    with c_key:
+        st.markdown(
+            f'<div style="background:#f0fdf4;border-radius:10px;padding:10px 16px;'
+            f'border-left:4px solid #22c55e">'
+            f'<strong style="color:#15803d">⭐ 주요 소재 (ROAS ≥ 1)</strong> — {len(key_ads)}개</div>',
+            unsafe_allow_html=True)
+    with c_other:
+        st.markdown(
+            f'<div style="background:#fef2f2;border-radius:10px;padding:10px 16px;'
+            f'border-left:4px solid #ef4444">'
+            f'<strong style="color:#991b1b">일반 소재 (ROAS &lt; 1)</strong> — {len(other_ads)}개</div>',
+            unsafe_allow_html=True)
+
+    st.markdown("")
+
+    # 주요 소재 차트
+    if not key_ads.empty:
+        col1, col2 = st.columns(2)
+        with col1:
+            fig = go.Figure(go.Bar(
+                y=key_ads["ad"].str[:22], x=key_ads["roas"], orientation="h",
+                marker=dict(color="#22c55e", line=dict(width=0)),
+                text=key_ads["roas"].apply(lambda x: f"{x:.2f}x"), textposition="outside",
+            ))
+            fig.update_layout(
+                title="ROAS (주요 소재)", height=max(200, len(key_ads) * 40),
+                yaxis=dict(autorange="reversed"), xaxis=dict(gridcolor="#f0f0f0"),
+                **{k: v for k, v in _CHART_BASE.items() if k != "margin"},
+                margin=dict(l=160, r=60, t=40, b=0),
+            )
+            st.plotly_chart(fig, use_container_width=True, key="meta_key_roas")
+        with col2:
+            fig = go.Figure(go.Bar(
+                y=key_ads["ad"].str[:22], x=key_ads["ctr"], orientation="h",
+                marker=dict(color="#4F86F7", line=dict(width=0)),
+                text=key_ads["ctr"].apply(lambda x: f"{x:.2f}%"), textposition="outside",
+            ))
+            fig.update_layout(
+                title="CTR (주요 소재)", height=max(200, len(key_ads) * 40),
+                yaxis=dict(autorange="reversed"), xaxis=dict(gridcolor="#f0f0f0"),
+                **{k: v for k, v in _CHART_BASE.items() if k != "margin"},
+                margin=dict(l=160, r=60, t=40, b=0),
+            )
+            st.plotly_chart(fig, use_container_width=True, key="meta_key_ctr")
+
+    # 소재 전체 테이블
+    st.markdown("##### 소재별 전체 테이블")
+    tbl_cols = [c for c in ["campaign", "ad", "impressions", "reach", "clicks", "ctr", "cpc", "cpm", "spend", "purchases", "purchase_value", "roas"] if c in ad_df.columns]
+    tbl = ad_df[tbl_cols].copy()
+    tbl["등급"] = tbl["roas"].apply(lambda x: "⭐ 주요" if x >= 1 else "일반")
+    tbl = tbl.sort_values("roas", ascending=False)
+    for c in ["spend", "purchase_value"]:
+        if c in tbl.columns:
+            tbl[c] = tbl[c].map(lambda x: f"₩{x:,.0f}")
+    for c in ["impressions", "reach"]:
+        if c in tbl.columns:
+            tbl[c] = tbl[c].map(lambda x: f"{x:,}")
+    tbl = tbl.rename(columns={
+        "campaign": "캠페인", "ad": "소재명", "impressions": "노출", "reach": "도달",
+        "clicks": "클릭", "ctr": "CTR(%)", "cpc": "CPC(원)", "cpm": "CPM(원)",
+        "spend": "소진(원)", "purchases": "구매", "purchase_value": "전환매출(원)", "roas": "ROAS",
+    })
+    st.dataframe(tbl, use_container_width=True, hide_index=True)
 
 
 # ── 헤더 ──────────────────────────────────────────────────────
@@ -601,10 +723,8 @@ with tab_summary:
             marker_colors=[CH_COLOR.get(c, "#888") for c in ch_rev["channel"]],
             hole=0.5, textinfo="label+percent",
         ))
-        fig_pie.update_layout(
-            height=220, margin=dict(l=0, r=0, t=0, b=0),
-            paper_bgcolor="rgba(0,0,0,0)",
-        )
+        fig_pie.update_layout(height=220, margin=dict(l=0, r=0, t=0, b=0),
+                               paper_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig_pie, use_container_width=True, key="pie_summary")
     with cpc2:
         for ch, color in CH_COLOR.items():
@@ -630,10 +750,8 @@ with tab_summary:
 with tab_pattern:
     st.markdown("### 주문 히트맵 (요일 × 시간대)")
     render_heatmap(df_all, tab="pat")
-
     st.markdown("### 시간대 · 요일 분석")
     render_hourly_dow(df_all, tab="pat")
-
     st.divider()
     st.markdown("### 트래픽 & 구매전환율 (Cafe24)")
     render_traffic(df_vis, tab="pat")
@@ -648,7 +766,7 @@ with tab_channel:
 
 # ── 광고성과 ───────────────────────────────────────────────────
 with tab_ads:
-    render_meta_placeholder()
+    render_meta_ads(df_meta_ads, df_meta_daily)
 
 
 # ── Cafe24 ─────────────────────────────────────────────────────
@@ -669,13 +787,9 @@ with tab_c24:
             pm = df_c24["payment_method"].value_counts().reset_index()
             pm.columns = ["method", "count"]
             fig_pm = go.Figure(go.Pie(
-                labels=pm["method"], values=pm["count"],
-                hole=0.4, textinfo="label+percent",
-            ))
-            fig_pm.update_layout(
-                height=280, paper_bgcolor="rgba(0,0,0,0)",
-                margin=dict(l=0, r=0, t=0, b=0),
-            )
+                labels=pm["method"], values=pm["count"], hole=0.4, textinfo="label+percent"))
+            fig_pm.update_layout(height=280, paper_bgcolor="rgba(0,0,0,0)",
+                                  margin=dict(l=0, r=0, t=0, b=0))
             _, cm, _ = st.columns([1, 2, 1])
             with cm:
                 st.plotly_chart(fig_pm, use_container_width=True, key="pie_c24")
