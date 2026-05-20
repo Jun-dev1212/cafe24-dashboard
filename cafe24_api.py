@@ -55,7 +55,6 @@ class Cafe24API:
             data = self._get("orders", {
                 "start_date": start_date,
                 "end_date": end_date,
-                "paid": "T",
                 "shop_no": 1,
                 "limit": 100,
                 "offset": offset,
@@ -97,6 +96,8 @@ def process_orders(orders: list) -> pd.DataFrame:
     rows = []
     for o in orders:
         if o.get("canceled") == "T":
+            continue
+        if float(o.get("payment_amount") or 0) <= 0:
             continue
         try:
             dt_str = o.get("order_date", "")
