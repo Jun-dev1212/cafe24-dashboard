@@ -64,10 +64,14 @@ def get_coupang() -> CoupangAPI:
 # ── 데이터 로드 (5분 캐시) ────────────────────────────────
 @st.cache_data(ttl=300, show_spinner=False)
 def load_cafe24(start: str, end: str) -> pd.DataFrame:
-    df = cafe24_process(get_cafe24().get_orders(start, end))
-    if not df.empty:
-        df["channel"] = "Cafe24"
-    return df
+    try:
+        df = cafe24_process(get_cafe24().get_orders(start, end))
+        if not df.empty:
+            df["channel"] = "Cafe24"
+        return df
+    except Exception as e:
+        st.error(f"Cafe24 API 오류: {e}")
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=300, show_spinner=False)

@@ -66,8 +66,8 @@ class Cafe24API:
                     if len(chunk) < 100:
                         break
                     offset += 100
-                except Exception:
-                    break
+                except Exception as e:
+                    raise
         return all_orders
 
     def get_sales_report(self, start_date: str, end_date: str) -> list:
