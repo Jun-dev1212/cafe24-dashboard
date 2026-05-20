@@ -155,7 +155,13 @@ with st.expander("🔧 API 연결 진단", expanded=True):
         import requests as _req
         _url = f"{api.base_url}/orders"
         _resp = _req.get(_url, headers=api._headers(), params={"start_date": s, "end_date": e, "shop_no": 1, "limit": 3})
-        st.info(f"HTTP {_resp.status_code}: {_resp.text[:500]}")
+        _data = _resp.json()
+        _orders = _data.get("orders", [])
+        if _orders:
+            o = _orders[0]
+            st.info(f"첫 주문 샘플 — order_status: {o.get('order_status')} | order_date: {o.get('order_date')} | actual_price: {o.get('actual_price')}")
+        else:
+            st.warning(f"HTTP {_resp.status_code}: 주문 없음 — {_resp.text[:300]}")
     except Exception as ex:
         st.error(f"❌ Cafe24 오류: {ex}")
 
