@@ -159,7 +159,8 @@ with st.expander("🔧 API 연결 진단", expanded=True):
         _orders = _data.get("orders", [])
         if _orders:
             o = _orders[0]
-            st.info(f"첫 주문 샘플 — order_status: {o.get('order_status')} | order_date: {o.get('order_date')} | actual_price: {o.get('actual_price')}")
+            st.info(f"첫 주문 샘플 — order_date: {o.get('order_date')} | actual_price: {o.get('actual_price')} | order_status: {o.get('order_status')} | status: {o.get('status')} | payment_amount: {o.get('payment_amount')} | total_amount: {o.get('total_amount')}")
+            st.code(str(list(o.keys())))
         else:
             st.warning(f"HTTP {_resp.status_code}: 주문 없음 — {_resp.text[:300]}")
     except Exception as ex:
