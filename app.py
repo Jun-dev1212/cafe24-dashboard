@@ -147,6 +147,16 @@ with st.sidebar:
 # ── 데이터 로드 ───────────────────────────────────────────
 s, e = start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
+# API 연결 상태 테스트
+with st.expander("🔧 API 연결 진단", expanded=True):
+    try:
+        api = get_cafe24()
+        st.success(f"✅ Cafe24 토큰 갱신 성공 (access_token: {api.access_token[:10]}...)")
+        raw = api._get("orders", {"start_date": s, "end_date": e, "order_status": "F", "limit": 5})
+        st.info(f"주문 API 응답: {raw}")
+    except Exception as ex:
+        st.error(f"❌ Cafe24 오류: {ex}")
+
 with st.spinner("데이터 불러오는 중…"):
     df_c24 = load_cafe24(s, e)
     df_cpg = load_coupang(s, e)
